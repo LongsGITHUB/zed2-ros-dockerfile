@@ -1,0 +1,61 @@
+# Use DustyNV's ROS2 Foxy base image for Jetson
+FROM dustynv/ros:foxy-ros-base-l4t-r35.4.1
+
+# Install prerequisites
+RUN apt-get update && apt-get install -y \
+    wget \
+    lsb-release \
+    gnupg2 \
+    zstd \
+    python3-pip \
+    python3-rosdep \
+    python3-rosinstall-generator \
+    python3-vcstool \
+    python3-rosinstall \
+    build-essential \
+    nvidia-cuda-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install the ZED SDK
+RUN wget --no-check-certificate https://download.stereolabs.com/zedsdk/4.2/l4t35.4/jetsons -O ZED_SDK_Tegra_L4T35.4_v4.2.1.zstd.run && \
+    chmod +x ZED_SDK_Tegra_L4T35.4_v4.2.1.zstd.run && \
+    ./ZED_SDK_Tegra_L4T35.4_v4.2.1.zstd.run -- silent && \
+    rm ZED_SDK_Tegra_L4T35.4_v4.2.1.zstd.run
+
+# Set up environment variables for the ZED SDK
+ENV ZED_SDK_ROOT="/usr/local/zed"
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/zed/lib"
+ENV PYTHONPATH="$PYTHONPATH:/usr/local/zed/python"
+
+# Install Python dependencies
+RUN pip3 install PyOpenGL PyOpenGL_accelerate
+
+# Set up ROS2 workspace and clone the ZED ROS2 wrapper repository
+RUN mkdir -p ~/ros2_ws/src/ && \
+    cd ~/ros2_ws/src/ && \
+    git clone --recursive https://github.com/stereolabs/zed-ros2-wrapper.git
+
+# Install robot_localization manually
+RUN apt-get update && \
+    apt-get install -y ros-foxy-robot-localization && \
+    rm -rf /var/lib/apt/lists/*
+
+# Clone zstd_point_cloud_transport into the workspace
+RUN cd ~/ros2_ws/src && \
+    git clone https://github.com/ros-perception/zstd_point_cloud_transport.git
+
+# Update package list, source ROS setup, initialize ROS dependencies, install dependencies, and build the workspace
+RUN . /opt/ros/foxy/setup.sh && \
+    rosdep init && \
+    rosdep update && \
+    cd ~/ros2_ws && \
+    rosdep install --from-paths src --ignore-src -r -y && \
+    colcon build --symlink-install --cmake-args=-DCMAKE_BUILD_TYPE=Release --parallel-workers $(nproc) && \
+    echo "source ~/ros2_ws/install/local_setup.bash" >> ~/.bashrc
+
+# Set the default shell to source the workspace by default
+SHELL ["/bin/bash", "-c"]
+RUN source ~/.bashrc
+
+# Set the default command to start a ROS 2 shell
+CMD ["bash"]
